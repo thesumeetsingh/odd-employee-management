@@ -4,7 +4,7 @@ require_once 'config.php';
 
 // Check if user is already logged in
 if(isset($_SESSION['loggedin'])) {
-    header("Location: " . ($_SESSION['is_admin'] ? 'admin-dashboard.php' : 'employee-dashboard.php'));
+    header("Location: " . ($_SESSION['is_admin'] ? 'admin/admin-dashboard.php' : 'employee-dashboard.php'));
     exit;
 }
 

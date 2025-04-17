@@ -113,10 +113,10 @@ if(!isset($_SESSION['loggedin']) ){
                     <p>Add holidays to the company calendar</p>
                 </a>
                 
-                <a href="holiday_status.php" class="dashboard-card">
+                <a href="manage_leave.php" class="dashboard-card">
                     <i class="fas fa-calendar-check"></i>
-                    <h3>Holiday Status</h3>
-                    <p>View employee holiday requests</p>
+                    <h3>Manage Leave</h3>
+                    <p>employee leave requests</p>
                 </a>
                 
                 <a href="download_data.php" class="dashboard-card">
