@@ -152,6 +152,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_status'])) {
         $current_date = clone $start_date;
         $admin_id = $_SESSION['admin_id'];
         
+        // Get employee name if not already in request
+        if (!isset($request['first_name'])) {
+            $stmt = $conn->prepare("SELECT first_name, last_name FROM odd_employee WHERE id = ?");
+            $stmt->bind_param("s", $request['employee_id']);
+            $stmt->execute();
+            $employee = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            $employee_name = $employee['first_name'] . ' ' . $employee['last_name'];
+        } else {
+            $employee_name = $request['first_name'] . ' ' . $request['last_name'];
+        }
+        
         while ($current_date <= $end_date) {
             $date_str = $current_date->format('Y-m-d');
             
@@ -159,7 +171,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_status'])) {
             $stmt = $conn->prepare("SELECT id FROM attendance WHERE employee_id = ? AND date = ?");
             $stmt->bind_param("ss", $request['employee_id'], $date_str);
             $stmt->execute();
-            $exists = $stmt->get_result()->num_rows > 0;
+            $result = $stmt->get_result();
+            $exists = $result->num_rows > 0;
             $stmt->close();
             
             if ($exists) {
@@ -171,16 +184,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_status'])) {
                                       approved_by = ?,
                                       updated_at = NOW()
                                       WHERE employee_id = ? AND date = ?");
-                $stmt->bind_param("sssss", $request['leave_type'], $request['reason'], $admin_id, $request['employee_id'], $date_str);
+                $stmt->bind_param("sssss", $request['leave_type'], $request['reason'], $admin_id, 
+                                 $request['employee_id'], $date_str);
             } else {
                 // Insert new record
                 $stmt = $conn->prepare("INSERT INTO attendance 
                                       (employee_id, employee_name, date, status, leave_type, comments, approved_by)
                                       VALUES (?, ?, ?, 'leave', ?, ?, ?)");
-                $stmt->bind_param("ssssss", $request['employee_id'], $request['first_name'].' '.$request['last_name'], $date_str, 
+                $stmt->bind_param("ssssss", $request['employee_id'], $employee_name, $date_str, 
                                  $request['leave_type'], $request['reason'], $admin_id);
             }
-            $stmt->execute();
+            
+            if (!$stmt->execute()) {
+                $_SESSION['error'] = "Error updating attendance records: " . $conn->error;
+                header("Location: leave-request.php");
+                exit();
+            }
             $stmt->close();
             
             $current_date->modify('+1 day');
@@ -202,7 +221,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_status'])) {
 // Display any error from previous operation
 $error = isset($_SESSION['error']) ? $_SESSION['error'] : '';
 unset($_SESSION['error']);
-
 
 
 // Leave type colors
@@ -264,6 +282,11 @@ $leave_type_colors = [
       padding: 10px;
       margin-bottom: 10px;
     }
+    .approved-remarks {
+      background-color: #e8f5e9;
+      padding: 10px;
+      border-radius: 5px;
+    }
   </style>
 </head>
 <body>
@@ -313,10 +336,6 @@ $leave_type_colors = [
                 <tbody>
                   <?php foreach ($pending_requests as $request): 
                     // Get leave balance for warning
-                    if (!$conn || $conn->connect_errno) {
-                        die("Database connection failed: " . $conn->connect_error);
-                    }
-                    
                     $balance_stmt = $conn->prepare("SELECT * FROM leave_balance WHERE employee_id = ?");
                     $balance_stmt->bind_param("s", $request['employee_id']);
                     $balance_stmt->execute();
@@ -510,23 +529,46 @@ $leave_type_colors = [
                       <td><?php echo htmlspecialchars($request['admin_remarks'] ?: '--'); ?></td>
                       <td><?php echo date('d M Y', strtotime($request['created_at'])); ?></td>
                       <td class="action-buttons">
-                        <form method="POST" action="leave-request.php">
-                          <input type="hidden" name="request_id" value="<?php echo $request['id']; ?>">
-                          <div class="form-group">
-                            <textarea class="form-control mb-2" name="admin_remarks" placeholder="Admin remarks" rows="2"><?php echo htmlspecialchars($request['admin_remarks']); ?></textarea>
-                          </div>
-                          <div class="d-flex justify-content-between">
-                            <button type="submit" name="update_status" value="approved" class="btn btn-success btn-sm">
-                              <i class="fas fa-check"></i> Approve
-                            </button>
-                            <button type="submit" name="update_status" value="pending" class="btn btn-warning btn-sm">
-                              <i class="fas fa-clock"></i> Pending
-                            </button>
-                            <button type="submit" name="update_status" value="rejected" class="btn btn-danger btn-sm">
-                              <i class="fas fa-times"></i> Reject
-                            </button>
-                          </div>
-                        </form>
+                        <?php if ($request['status'] == 'pending'): ?>
+                          <form method="POST" action="leave-request.php">
+                            <input type="hidden" name="request_id" value="<?php echo $request['id']; ?>">
+                            <div class="form-group">
+                              <textarea class="form-control mb-2" name="admin_remarks" placeholder="Admin remarks" rows="2"><?php echo htmlspecialchars($request['admin_remarks']); ?></textarea>
+                            </div>
+                            <div class="d-flex justify-content-between">
+                              <button type="submit" name="update_status" value="approved" class="btn btn-success btn-sm">
+                                <i class="fas fa-check"></i> Approve
+                              </button>
+                              <button type="submit" name="update_status" value="rejected" class="btn btn-danger btn-sm">
+                                <i class="fas fa-times"></i> Reject
+                              </button>
+                            </div>
+                          </form>
+                        <?php elseif ($request['status'] == 'rejected'): ?>
+                          <form method="POST" action="leave-request.php">
+                            <input type="hidden" name="request_id" value="<?php echo $request['id']; ?>">
+                            <div class="form-group">
+                              <textarea class="form-control mb-2" name="admin_remarks" placeholder="Admin remarks" rows="2"><?php echo htmlspecialchars($request['admin_remarks']); ?></textarea>
+                            </div>
+                            <div class="d-flex justify-content-between">
+                              <button type="submit" name="update_status" value="approved" class="btn btn-success btn-sm">
+                                <i class="fas fa-check"></i> Approve
+                              </button>
+                              <button type="submit" name="update_status" value="pending" class="btn btn-warning btn-sm">
+                                <i class="fas fa-clock"></i> Pending
+                              </button>
+                            </div>
+                          </form>
+                        <?php else: ?>
+                          <!-- Approved leaves - no action buttons -->
+                          <?php if ($request['admin_remarks']): ?>
+                            <div class="approved-remarks">
+                              <?php echo htmlspecialchars($request['admin_remarks']); ?>
+                            </div>
+                          <?php else: ?>
+                            <span class="text-muted">Approved</span>
+                          <?php endif; ?>
+                        <?php endif; ?>
                       </td>
                     </tr>
                   <?php endforeach; ?>
@@ -539,13 +581,20 @@ $leave_type_colors = [
     </div>
   </div>
 
-
+  <!-- Footer -->
+  <footer class="contact-section fixed-bottom text-center py-3">
+    <div class="container">
+      <p>9907415948 | 6262023330</p>
+      <p>oddbhilai@gmail.com</p>
+    </div>
+  </footer>
 
   <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
   <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
 </body>
 </html>
+
 <?php
 // Close DB connection after everything
 $conn->close();
