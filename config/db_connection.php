@@ -7,7 +7,7 @@ $db_name = 'oddbhilai';
 
 // Create connection
 $conn = new mysqli($db_host, $db_user, $db_pass, $db_name);
-
+date_default_timezone_set('Asia/Kolkata'); 
 // Check connection
 if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);

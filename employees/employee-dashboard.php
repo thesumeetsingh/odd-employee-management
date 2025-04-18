@@ -109,7 +109,7 @@ $conn->close();
       
       <!-- Apply for Leave Tile -->
       <div class="col-md-3 col-sm-6 mb-4">
-        <a href="employee/apply-leave.php" class="text-decoration-none">
+        <a href="apply-leave.php" class="text-decoration-none">
           <div class="dashboard-tile">
             <i class="fas fa-clipboard-list"></i>
             <h5>Apply for Leave</h5>
