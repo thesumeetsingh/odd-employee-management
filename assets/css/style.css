@@ -1,0 +1,72 @@
+body {
+    font-family: 'Segoe UI', sans-serif;
+    padding-top: 80px;
+  }
+  
+  .logo-img {
+    height: 50px;
+    width: auto;
+  }
+  
+  .owner-section {
+    padding: 40px 20px;
+    background-color: #f8f9fa;
+  }
+  
+  .services-section {
+    padding: 40px 20px;
+    background-color: #ffffff;
+  }
+  
+  .service-tile {
+    border: 1px solid #dee2e6;
+    padding: 30px 20px;
+    border-radius: 10px;
+    background-color: #f0f0f0;
+    transition: transform 0.3s ease;
+  }
+  
+  .service-tile:hover {
+    transform: scale(1.05);
+  }
+  
+  .contact-section {
+    background-color: #343a40;
+    color: white;
+    padding: 20px;
+    text-align: center;
+  }
+.service-tiles-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: center;
+    align-items: stretch; /* Ensures all tiles stretch to the same height */
+}
+
+.service-tile {
+    flex: 1 1 calc(25% - 20px); /* Adjusts to 4 tiles per row with spacing */
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    height: 100%; /* Ensures tiles take up equal height */
+    box-sizing: border-box;
+}
+
+.service-tile p {
+    flex-grow: 1;
+}
+
+@media (max-width: 768px) {
+    .service-tile {
+        flex: 1 1 calc(50% - 20px); /* Adjusts to 2 tiles per row on smaller screens */
+    }
+}
+
+@media (max-width: 480px) {
+    .service-tile {
+        flex: 1 1 100%; /* Stacks tiles vertically on very small screens */
+    }
+
+}
