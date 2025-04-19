@@ -78,8 +78,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['check_out'])) {
         $status = 'pending'; // Needs admin approval
     }
     
-    $stmt = $conn->prepare("UPDATE attendance SET check_out = ?, total_hours = ?, counted_hours = ?, status = ?, comments = ? WHERE id = ?");
-    $stmt->bind_param("sddssi", $check_out_time, $total_hours, $counted_hours, $status, $comments, $attendance['id']);
+    $stmt = $conn->prepare("UPDATE attendance SET check_out = ?, status = ?, total_hours = ?, counted_hours = ?, comments = ? WHERE employee_id = ? AND date = ?");
+    $stmt->bind_param("ssdssss", $check_out_time, $status, $total_hours, $counted_hours, $comments, $employee_id, $today);
     
     if ($stmt->execute()) {
         $success = "Check-out recorded successfully at " . date('h:i A', strtotime($check_out_time));
@@ -225,13 +225,7 @@ $conn->close();
     </div>
   </div>
 
-  <!-- Footer -->
-  <footer class="contact-section fixed-bottom text-center py-3">
-    <div class="container">
-      <p>9907415948 | 6262023330</p>
-      <p>oddbhilai@gmail.com</p>
-    </div>
-  </footer>
+
 
   <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>

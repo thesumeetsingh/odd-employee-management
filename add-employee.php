@@ -4,7 +4,7 @@ require_once 'config/db_connection.php';
 
 // Check if admin is logged in
 if (!isset($_SESSION['admin_id'])) {
-    header("Location: ../admin-login.php");
+    header("Location: admin-login.php");
     exit();
 }
 
@@ -86,8 +86,8 @@ $conn->close();
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Add Employee | ODD</title>
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-  <link rel="stylesheet" href="../assets/css/style.css">
-  <link rel="icon" href="../assets/images/logo.jpg" type="image/jpeg">
+  <link rel="stylesheet" href="assets/css/style.css">
+  <link rel="icon" href="assets/images/logo.jpg" type="image/jpeg">
   <style>
     .form-container {
       background-color: #fff;
@@ -116,8 +116,8 @@ $conn->close();
   <!-- Navbar -->
   <nav class="navbar navbar-expand-lg navbar-light bg-light fixed-top shadow-sm">
     <div class="container d-flex justify-content-between align-items-center">
-      <a class="navbar-brand d-flex align-items-center" href="../index.html">
-        <img src="../assets/images/logo.jpg" alt="Logo" class="logo-img mr-2">
+      <a class="navbar-brand d-flex align-items-center" href="index.html">
+        <img src="assets/images/logo.jpg" alt="Logo" class="logo-img mr-2">
         <strong style="font-size:30px;">Organised Design Desk</strong>
       </a>
       <div>
@@ -194,6 +194,11 @@ $conn->close();
             </div>
             
             <div class="form-group">
+              <label for="role" class="required-field">Role/Designation</label>
+              <input type="text" class="form-control" id="role" name="role" required>
+            </div>
+
+            <div class="form-group">
               <label for="resume">Resume/CV (Optional)</label>
               <div class="custom-file">
                 <input type="file" class="custom-file-input" id="resume" name="resume">
@@ -213,13 +218,7 @@ $conn->close();
     </div>
   </div>
 
-  <!-- Footer -->
-  <footer class="contact-section fixed-bottom text-center py-3">
-    <div class="container">
-      <p>9907415948 | 6262023330</p>
-      <p>oddbhilai@gmail.com</p>
-    </div>
-  </footer>
+
 
   <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
