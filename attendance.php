@@ -12,8 +12,8 @@ if (!isset($_SESSION['admin_id'])) {
 $status_mapping = [
     'present' => ['code' => 'P', 'color' => 'bg-success', 'description' => 'Present'],
     'absent' => ['code' => 'A', 'color' => 'bg-danger', 'description' => 'Absent'],
-    'casual' => ['code' => 'CL', 'color' => 'bg-warning', 'description' => 'Casual Leave'],
-    'medical' => ['code' => 'ML', 'color' => 'bg-orange', 'description' => 'Medical Leave'],
+    'casual leave' => ['code' => 'CL', 'color' => 'bg-warning', 'description' => 'Casual Leave'],
+    'medical leave' => ['code' => 'ML', 'color' => 'bg-orange', 'description' => 'Medical Leave'],
     'comp-off' => ['code' => 'CO', 'color' => 'bg-primary', 'description' => 'Compensatory Off'],
     'holiday' => ['code' => 'H', 'color' => 'bg-secondary', 'description' => 'Holiday'],
     'sunday' => ['code' => 'S', 'color' => 'bg-light', 'description' => 'Sunday'],

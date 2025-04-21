@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $address = $_POST['address'];
     
     // Handle resume upload
-    $resume_path = null;
+    $resume_uploaded = false;
     if (isset($_FILES['resume']) && $_FILES['resume']['error'] == UPLOAD_ERR_OK) {
         $resume = $_FILES['resume'];
         
@@ -52,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             
             // Move uploaded file
             if (move_uploaded_file($resume['tmp_name'], $target_file)) {
-                $resume_path = "employees/" . $employee_id . "/" . $filename;
+                $resume_uploaded = true;
             } else {
                 $error = "Error uploading resume file.";
             }
@@ -75,12 +75,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         if ($stmt->execute()) {
             $success = "Profile updated successfully!";
             // Refresh employee data
-            $stmt = $conn->prepare("SELECT * FROM odd_employee WHERE id = ?");
-            $stmt->bind_param("s", $employee_id);
-            $stmt->execute();
-            $result = $stmt->get_result();
+            $refresh_stmt = $conn->prepare("SELECT * FROM odd_employee WHERE id = ?");
+            $refresh_stmt->bind_param("s", $employee_id);
+            $refresh_stmt->execute();
+            $result = $refresh_stmt->get_result();
             $employee = $result->fetch_assoc();
-            $stmt->close();
+            $refresh_stmt->close();
         } else {
             $error = "Error updating profile: " . $conn->error;
         }
@@ -112,6 +112,16 @@ $conn->close();
       border-bottom: 1px solid #dee2e6;
       padding-bottom: 20px;
       margin-bottom: 30px;
+      text-align: center;
+    }
+    .employee-name {
+      font-size: 2rem;
+      font-weight: 500;
+      margin-bottom: 5px;
+    }
+    .employee-details {
+      color: #6c757d;
+      font-size: 1.1rem;
     }
     .form-group.required label:after {
       content: " *";
@@ -122,15 +132,6 @@ $conn->close();
       padding: 15px;
       border-radius: 5px;
       margin-top: 10px;
-    }
-    .employee-name {
-      font-size: 2rem;
-      font-weight: 500;
-      margin-bottom: 0;
-    }
-    .employee-details {
-      color: #6c757d;
-      margin-bottom: 20px;
     }
   </style>
 </head>
@@ -144,7 +145,7 @@ $conn->close();
       </a>
       <div>
         <a href="../employee-dashboard.php" class="btn btn-outline-dark mr-2">
-          <i class="fas fa-arrow-left mr-1"></i> Back to Dashboard
+          <i class="fas fa-arrow-left mr-1"></i> Dashboard
         </a>
         <a href="../logout.php" class="btn btn-dark">Logout</a>
       </div>
@@ -156,12 +157,11 @@ $conn->close();
     <div class="row justify-content-center">
       <div class="col-md-8">
         <div class="profile-card">
-          <!-- Updated Profile Header -->
-          <div class="profile-header text-center">
+          <!-- Profile Header with Employee Name -->
+          <div class="profile-header">
             <h1 class="employee-name"><?php echo htmlspecialchars($employee['first_name'] . ' ' . $employee['last_name']); ?></h1>
             <div class="employee-details">
-              <span class="badge badge-secondary"><?php echo htmlspecialchars($employee['role']); ?></span>
-              <span class="badge badge-light ml-2">ID: <?php echo htmlspecialchars($employee_id); ?></span>
+              <?php echo htmlspecialchars($employee['role']); ?> • ID: <?php echo htmlspecialchars($employee_id); ?>
             </div>
           </div>
           
@@ -239,16 +239,15 @@ $conn->close();
                 Max file size: 5MB. Allowed formats: PDF, DOC, DOCX
               </small>
               
-              <?php if (!empty($employee['folder_location'])): 
-                $resume_path = glob("../employees/" . $employee_id . "/*Resume.*");
-                if (!empty($resume_path)): ?>
-                  <div class="resume-preview mt-2">
-                    <h6>Current Resume:</h6>
-                    <a href="<?php echo str_replace('../', '', $resume_path[0]); ?>" target="_blank" class="btn btn-sm btn-outline-primary">
-                      <i class="fas fa-file-download mr-1"></i> Download Current Resume
-                    </a>
-                  </div>
-                <?php endif; ?>
+              <?php 
+              $resume_path = glob("../employees/" . $employee_id . "/*Resume.*");
+              if (!empty($resume_path)): ?>
+                <div class="resume-preview mt-2">
+                  <h6>Current Resume:</h6>
+                  <a href="<?php echo str_replace('../', '', $resume_path[0]); ?>" target="_blank" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-file-download mr-1"></i> Download Current Resume
+                  </a>
+                </div>
               <?php endif; ?>
             </div>
             

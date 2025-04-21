@@ -146,6 +146,16 @@ $conn->close();
         </a>
       </div>
       
+      <!-- Notify Employees Tile -->
+<div class="col-md-4 col-sm-6 mb-4">
+  <a href="add-notice.php" class="text-decoration-none">
+    <div class="dashboard-tile">
+      <i class="fas fa-bullhorn"></i>
+      <h5>Notify Employees</h5>
+    </div>
+  </a>
+</div>
+
       <!-- Add Holiday Tile -->
       <div class="col-md-4 col-sm-6 mb-4">
         <a href="add-holiday.php" class="text-decoration-none">

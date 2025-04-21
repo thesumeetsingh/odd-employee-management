@@ -101,12 +101,22 @@ $conn->close();
         <a href="my-attendance.php" class="text-decoration-none">
           <div class="dashboard-tile">
             <i class="fas fa-calendar-check"></i>
-            <h5>Attendance</h5>
-            <p class="text-muted small">View your attendance records</p>
+            <h5>Check In-Out</h5>
+            <p class="text-muted small">Mark your Today's Attendance</p>
           </div>
         </a>
       </div>
       
+      <!-- Attendance Tile -->
+      <div class="col-md-3 col-sm-6 mb-4">
+        <a href="attendance-history.php" class="text-decoration-none">
+          <div class="dashboard-tile">
+            <i class="fas fa-history"></i>
+            <h5>Attendance History</h5>
+            <p class="text-muted small">View your attendance records</p>
+          </div>
+        </a>
+      </div>     
       <!-- Apply for Leave Tile -->
       <div class="col-md-3 col-sm-6 mb-4">
         <a href="apply-leave.php" class="text-decoration-none">
