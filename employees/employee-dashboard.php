@@ -87,7 +87,7 @@ $conn->close();
     <div class="row">
       <!-- Manage Profile Tile -->
       <div class="col-md-3 col-sm-6 mb-4">
-        <a href="employee/myprofile.php" class="text-decoration-none">
+        <a href="myprofile.php" class="text-decoration-none">
           <div class="dashboard-tile">
             <i class="fas fa-user-edit"></i>
             <h5>Manage Profile</h5>

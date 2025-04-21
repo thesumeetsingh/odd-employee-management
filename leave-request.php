@@ -8,228 +8,157 @@ if (!isset($_SESSION['admin_id'])) {
     exit();
 }
 
-// Constants for leave limits
-define('MEDICAL_LEAVE_LIMIT', 6);
-define('CASUAL_LEAVE_LIMIT', 12);
-define('OTHER_LEAVE_LIMIT', 3);
-define('COMPENSATORY_LEAVE_LIMIT', 0); // Adjust as needed
+$success = '';
+$error = '';
 
-// Get filter parameters
-$filter_employee = isset($_GET['employee_id']) ? $_GET['employee_id'] : '';
-$filter_month = isset($_GET['month']) ? (int)$_GET['month'] : date('n');
-$filter_year = isset($_GET['year']) ? (int)$_GET['year'] : date('Y');
-$filter_status = isset($_GET['status']) ? $_GET['status'] : '';
-
-// Mark new requests as seen when page loads
-$conn->query("UPDATE leave_requests SET is_seen = TRUE WHERE is_seen = FALSE");
-
-// Get pending leave requests
-$pending_query = "SELECT lr.*, e.first_name, e.last_name 
-                 FROM leave_requests lr
-                 JOIN odd_employee e ON lr.employee_id = e.id
-                 WHERE lr.status = 'pending'
-                 ORDER BY lr.created_at DESC";
-$pending_requests = $conn->query($pending_query)->fetch_all(MYSQLI_ASSOC);
-
-// Get leave history with filters
-$history_query = "SELECT lr.*, e.first_name, e.last_name 
-                 FROM leave_requests lr
-                 JOIN odd_employee e ON lr.employee_id = e.id
-                 WHERE 1=1";
-
-$params = [];
-$types = '';
-
-if (!empty($filter_employee)) {
-    $history_query .= " AND lr.employee_id = ?";
-    $params[] = $filter_employee;
-    $types .= 's';
-}
-
-if (!empty($filter_month) && !empty($filter_year)) {
-    $history_query .= " AND MONTH(lr.start_date) = ? AND YEAR(lr.start_date) = ?";
-    $params[] = $filter_month;
-    $params[] = $filter_year;
-    $types .= 'ii';
-}
-
-if (!empty($filter_status)) {
-    $history_query .= " AND lr.status = ?";
-    $params[] = $filter_status;
-    $types .= 's';
-}
-
-$history_query .= " ORDER BY lr.created_at DESC";
-
-$stmt = $conn->prepare($history_query);
-if (!empty($params)) {
-    $stmt->bind_param($types, ...$params);
-}
-$stmt->execute();
-$leave_history = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-$stmt->close();
-
-// Get all employees for filter dropdown
-$employees = $conn->query("SELECT id, CONCAT(first_name, ' ', last_name) AS name FROM odd_employee ORDER BY first_name")->fetch_all(MYSQLI_ASSOC);
-
-// Handle leave status update
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_status'])) {
+// Handle leave request approval/denial
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $request_id = $_POST['request_id'];
-    $status = $_POST['status'];
-    $admin_remarks = !empty($_POST['admin_remarks']) ? $_POST['admin_remarks'] : null;
-    
-    // Get the leave request details
-    $stmt = $conn->prepare("SELECT * FROM leave_requests WHERE id = ?");
+    $action = $_POST['action'];
+    $admin_remarks = $_POST['admin_remarks'] ?? '';
+    $admin_id = $_SESSION['admin_id'];
+
+    // Get the leave request details with employee first and last name
+    $stmt = $conn->prepare("SELECT lr.*, e.first_name, e.last_name 
+                           FROM leave_requests lr
+                           JOIN odd_employee e ON lr.employee_id = e.id
+                           WHERE lr.id = ?");
     $stmt->bind_param("i", $request_id);
     $stmt->execute();
-    $request = $stmt->get_result()->fetch_assoc();
+    $result = $stmt->get_result();
+    $leave_request = $result->fetch_assoc();
     $stmt->close();
-    
-    // Calculate leave days
-    $start_date = new DateTime($request['start_date']);
-    $end_date = new DateTime($request['end_date']);
-    $leave_days = $end_date->diff($start_date)->days + 1;
-    
-    // Check leave balance if approving
-    if ($status == 'approved') {
-        // Get current leave balance
-        $stmt = $conn->prepare("SELECT * FROM leave_balance WHERE employee_id = ?");
-        $stmt->bind_param("s", $request['employee_id']);
-        $stmt->execute();
-        $balance = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
-        
-        if (!$balance) {
-            // Initialize balance if not exists
-            $conn->query("INSERT INTO leave_balance (employee_id) VALUES ('{$request['employee_id']}')");
-            $balance = [
-                'medical_leave_taken' => 0,
-                'casual_leave_taken' => 0,
-                'compensatory_leave_taken' => 0,
-                'other_leave_taken' => 0
-            ];
-        }
-        
-        // Check leave limits
-        $leave_type = $request['leave_type'];
-        $limit_exceeded = false;
-        $leave_limit = 0;
-        
-        switch ($leave_type) {
-            case 'medical':
-                $taken = $balance['medical_leave_taken'] + $leave_days;
-                $limit_exceeded = $taken > MEDICAL_LEAVE_LIMIT;
-                $leave_limit = MEDICAL_LEAVE_LIMIT;
-                break;
-            case 'casual':
-                $taken = $balance['casual_leave_taken'] + $leave_days;
-                $limit_exceeded = $taken > CASUAL_LEAVE_LIMIT;
-                $leave_limit = CASUAL_LEAVE_LIMIT;
-                break;
-            case 'other':
-                $taken = $balance['other_leave_taken'] + $leave_days;
-                $limit_exceeded = $taken > OTHER_LEAVE_LIMIT;
-                $leave_limit = OTHER_LEAVE_LIMIT;
-                break;
-        }
-        
-        if ($limit_exceeded) {
-            $_SESSION['error'] = "Cannot approve leave. {$leave_type} leave limit ({$leave_limit} days) will be exceeded.";
-            header("Location: leave-request.php");
-            exit();
-        }
-    }
-    
-    // Update leave request status
-    $stmt = $conn->prepare("UPDATE leave_requests SET status = ?, admin_remarks = ?, updated_at = NOW() WHERE id = ?");
-    $stmt->bind_param("ssi", $status, $admin_remarks, $request_id);
-    $stmt->execute();
-    $stmt->close();
-    
-    // If approved, update attendance records and leave balance
-    if ($status == 'approved') {
-        // Update attendance records for each day of leave
-        $current_date = clone $start_date;
-        $admin_id = $_SESSION['admin_id'];
-        
-        // Get employee name if not already in request
-        if (!isset($request['first_name'])) {
-            $stmt = $conn->prepare("SELECT first_name, last_name FROM odd_employee WHERE id = ?");
-            $stmt->bind_param("s", $request['employee_id']);
+
+    if ($leave_request) {
+        // Begin transaction
+        $conn->begin_transaction();
+
+        try {
+            // 1. Update the leave_requests table
+            $stmt = $conn->prepare("UPDATE leave_requests 
+                                  SET status = ?, admin_remarks = ?, is_seen = 1, updated_at = NOW() 
+                                  WHERE id = ?");
+            $status = ($action == 'approve') ? 'approved' : 'rejected';
+            $stmt->bind_param("ssi", $status, $admin_remarks, $request_id);
             $stmt->execute();
-            $employee = $stmt->get_result()->fetch_assoc();
             $stmt->close();
-            $employee_name = $employee['first_name'] . ' ' . $employee['last_name'];
-        } else {
-            $employee_name = $request['first_name'] . ' ' . $request['last_name'];
-        }
-        
-        while ($current_date <= $end_date) {
-            $date_str = $current_date->format('Y-m-d');
-            
-            // Check if record already exists
-            $stmt = $conn->prepare("SELECT id FROM attendance WHERE employee_id = ? AND date = ?");
-            $stmt->bind_param("ss", $request['employee_id'], $date_str);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $exists = $result->num_rows > 0;
-            $stmt->close();
-            
-            if ($exists) {
-                // Update existing record
-                $stmt = $conn->prepare("UPDATE attendance SET 
-                                      status = 'leave',
-                                      leave_type = ?,
-                                      comments = ?,
-                                      approved_by = ?,
-                                      updated_at = NOW()
-                                      WHERE employee_id = ? AND date = ?");
-                $stmt->bind_param("sssss", $request['leave_type'], $request['reason'], $admin_id, 
-                                 $request['employee_id'], $date_str);
-            } else {
-                // Insert new record
-                $stmt = $conn->prepare("INSERT INTO attendance 
-                                      (employee_id, employee_name, date, status, leave_type, comments, approved_by)
-                                      VALUES (?, ?, ?, 'leave', ?, ?, ?)");
-                $stmt->bind_param("ssssss", $request['employee_id'], $employee_name, $date_str, 
-                                 $request['leave_type'], $request['reason'], $admin_id);
+
+            // 2. If approved, update the attendance table for each day of leave
+            if ($action == 'approve') {
+                $start_date = new DateTime($leave_request['start_date']);
+                $end_date = new DateTime($leave_request['end_date']);
+                $end_date->modify('+1 day'); // To include the end date in the period
+                
+                $interval = new DateInterval('P1D');
+                $period = new DatePeriod($start_date, $interval, $end_date);
+                
+                // Determine status and leave type based on leave type
+                $status_value = '';
+                $leave_type_value = '';
+                
+                switch ($leave_request['leave_type']) {
+                    case 'medical':
+                        $status_value = 'Medical Leave';
+                        $leave_type_value = 'medical';
+                        break;
+                    case 'casual':
+                        $status_value = 'Casual Leave';
+                        $leave_type_value = 'casual';
+                        break;
+                    case 'half_day':
+                        $status_value = 'Half Day';
+                        $leave_type_value = 'half_day';
+                        break;
+                    default:
+                        $status_value = 'Leave';
+                        $leave_type_value = 'other';
+                }
+                
+                    // Prepare insert statement for attendance records
+                    $stmt = $conn->prepare("INSERT INTO attendance 
+                                          (employee_id, employee_name, date, check_in, check_out, 
+                                          total_hours, counted_hours, status, leave_type, 
+                                          comments, approved_by, created_at, updated_at) 
+                                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                                          ON DUPLICATE KEY UPDATE 
+                                          employee_name = VALUES(employee_name),
+                                          status = VALUES(status), 
+                                          leave_type = VALUES(leave_type), 
+                                          comments = VALUES(comments), 
+                                          approved_by = VALUES(approved_by), 
+                                          updated_at = NOW()");
+
+                    // Create variables for binding
+                    $nullTime = null;
+                    $zeroHours = 0.00;
+                    $employee_full_name = $leave_request['first_name'] . ' ' . $leave_request['last_name'];
+
+                    foreach ($period as $date) {
+                        $date_str = $date->format('Y-m-d');
+                        // Correct parameter binding - 11 parameters total
+                        $stmt->bind_param("ssssddsssss", 
+                            $leave_request['employee_id'],  // s
+                            $employee_full_name,            // s (employee_name)
+                            $date_str,                      // s
+                            $nullTime,                      // s (check_in as NULL)
+                            $nullTime,                      // s (check_out as NULL)
+                            $zeroHours,                     // d (total_hours)
+                            $zeroHours,                     // d (counted_hours)
+                            $status_value,                  // s
+                            $leave_type_value,              // s
+                            $leave_request['reason'],       // s
+                            $admin_id                       // s
+                        );
+                        $stmt->execute();
+                    }
+                    $stmt->close();
             }
-            
-            if (!$stmt->execute()) {
-                $_SESSION['error'] = "Error updating attendance records: " . $conn->error;
-                header("Location: leave-request.php");
-                exit();
-            }
-            $stmt->close();
-            
-            $current_date->modify('+1 day');
+
+            // Commit transaction
+            $conn->commit();
+            $success = "Leave request has been " . $status . " successfully!";
+        } catch (Exception $e) {
+            // Rollback transaction on error
+            $conn->rollback();
+            $error = "Error processing leave request: " . $e->getMessage();
         }
-        
-        // Update leave balance
-        $column = $request['leave_type'].'_leave_taken';
-        $stmt = $conn->prepare("UPDATE leave_balance SET {$column} = {$column} + ? WHERE employee_id = ?");
-        $stmt->bind_param("is", $leave_days, $request['employee_id']);
-        $stmt->execute();
-        $stmt->close();
+    } else {
+        $error = "Leave request not found!";
     }
-    
-    // Refresh page
-    header("Location: leave-request.php");
-    exit();
 }
 
-// Display any error from previous operation
-$error = isset($_SESSION['error']) ? $_SESSION['error'] : '';
-unset($_SESSION['error']);
+// Get pending leave requests with employee names
+$stmt = $conn->prepare("SELECT lr.*, e.first_name, e.last_name 
+                       FROM leave_requests lr
+                       JOIN odd_employee e ON lr.employee_id = e.id
+                       WHERE lr.status = 'pending'
+                       ORDER BY lr.created_at DESC");
+$stmt->execute();
+$pending_requests = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
 
+// Get processed leave requests (for history)
+$stmt = $conn->prepare("SELECT lr.*, e.first_name, e.last_name 
+                       FROM leave_requests lr
+                       JOIN odd_employee e ON lr.employee_id = e.id
+                       WHERE lr.status != 'pending'
+                       ORDER BY lr.updated_at DESC
+                       LIMIT 20");
+$stmt->execute();
+$processed_requests = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
 
-// Leave type colors
-$leave_type_colors = [
-    'casual' => 'bg-warning',    // Yellow
-    'medical' => 'bg-orange',    // Orange
-    'other' => 'bg-pink'        // Pink
+$conn->close();
+
+// Status badge classes
+$status_classes = [
+    'pending' => 'badge-warning',
+    'approved' => 'badge-success',
+    'rejected' => 'badge-danger'
 ];
 ?>
+
+<!-- REST OF YOUR HTML REMAINS EXACTLY THE SAME -->
 
 <!DOCTYPE html>
 <html lang="en">
@@ -249,43 +178,30 @@ $leave_type_colors = [
       margin-top: 20px;
     }
     .table-responsive {
-      margin-top: 20px;
+      margin-top: 30px;
     }
     .table th {
       background-color: #343a40;
       color: white;
     }
-    .bg-orange {
-      background-color: #fd7e14 !important;
+    .badge-pending {
+      background-color: #ffc107;
+      color: #212529;
+    }
+    .badge-approved {
+      background-color: #28a745;
       color: white;
     }
-    .bg-pink {
-      background-color: #e83e8c !important;
+    .badge-rejected {
+      background-color: #dc3545;
       color: white;
-    }
-    .filter-section {
-      background-color: #f8f9fa;
-      border-radius: 10px;
-      padding: 20px;
-      margin-bottom: 20px;
-    }
-    .badge-status {
-      font-size: 0.9rem;
-      padding: 5px 10px;
     }
     .action-buttons .btn {
-      margin: 0 3px;
+      margin: 0 5px;
     }
-    .leave-limit-warning {
-      background-color: #fff3cd;
-      border-left: 4px solid #ffc107;
-      padding: 10px;
-      margin-bottom: 10px;
-    }
-    .approved-remarks {
-      background-color: #e8f5e9;
-      padding: 10px;
-      border-radius: 5px;
+    .nav-tabs .nav-link.active {
+      font-weight: bold;
+      border-bottom: 3px solid #343a40;
     }
   </style>
 </head>
@@ -293,301 +209,181 @@ $leave_type_colors = [
   <!-- Navbar -->
   <nav class="navbar navbar-expand-lg navbar-light bg-light fixed-top shadow-sm">
     <div class="container d-flex justify-content-between align-items-center">
-      <a class="navbar-brand d-flex align-items-center" href="../index.html">
+      <a class="navbar-brand d-flex align-items-center" href="admin-dashboard.php">
         <img src="assets/images/logo.jpg" alt="Logo" class="logo-img mr-2">
         <strong style="font-size:30px;">Organised Design Desk</strong>
       </a>
       <div>
-        <a href="admin-dashboard.php" class="btn btn-outline-secondary mr-2">Dashboard</a>
+        <span class="mr-3">Admin Dashboard</span>
         <a href="logout.php" class="btn btn-dark">Logout</a>
       </div>
     </div>
   </nav>
 
-  <!-- Leave Requests Content -->
+  <!-- Main Content -->
   <div class="container mt-5 pt-5">
-    <div class="row justify-content-center">
-      <div class="col-md-12">
-        <div class="leave-card">
-          <h2 class="text-center mb-4">Leave Requests Management</h2>
+    <div class="row">
+      <div class="col-12">
+        <h2><i class="fas fa-clipboard-list mr-2"></i>Leave Requests</h2>
+        <hr>
+        
+        <?php if (!empty($success)): ?>
+          <div class="alert alert-success"><?php echo $success; ?></div>
+        <?php endif; ?>
+        
+        <?php if (!empty($error)): ?>
+          <div class="alert alert-danger"><?php echo $error; ?></div>
+        <?php endif; ?>
+        
+        <!-- Tabs for Pending/Processed Requests -->
+        <ul class="nav nav-tabs" id="leaveTabs" role="tablist">
+          <li class="nav-item">
+            <a class="nav-link active" id="pending-tab" data-toggle="tab" href="#pending" role="tab">
+              Pending Requests
+              <?php if (count($pending_requests) > 0): ?>
+                <span class="badge badge-danger"><?php echo count($pending_requests); ?></span>
+              <?php endif; ?>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" id="processed-tab" data-toggle="tab" href="#processed" role="tab">
+              Processed Requests
+            </a>
+          </li>
+        </ul>
+        
+        <div class="tab-content" id="leaveTabsContent">
+          <!-- Pending Requests Tab -->
+          <div class="tab-pane fade show active" id="pending" role="tabpanel">
+            <?php if (empty($pending_requests)): ?>
+              <div class="alert alert-info mt-3">No pending leave requests</div>
+            <?php else: ?>
+              <div class="table-responsive mt-3">
+                <table class="table table-bordered table-hover">
+                  <thead class="thead-dark">
+                    <tr>
+                      <th>Employee</th>
+                      <th>Leave Type</th>
+                      <th>Dates</th>
+                      <th>Days</th>
+                      <th>Reason</th>
+                      <th>Applied On</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <?php foreach ($pending_requests as $request): ?>
+                      <tr>
+                        <td><?php echo htmlspecialchars($request['first_name'] . ' ' . $request['last_name']); ?></td>
+                        <td><?php echo ucfirst($request['leave_type']); ?></td>
+                        <td>
+                          <?php echo date('d M Y', strtotime($request['start_date'])); ?> - 
+                          <?php echo date('d M Y', strtotime($request['end_date'])); ?>
+                        </td>
+                        <td>
+                          <?php 
+                            $days = (strtotime($request['end_date']) - strtotime($request['start_date'])) / (60 * 60 * 24) + 1;
+                            echo $days;
+                          ?>
+                        </td>
+                        <td><?php echo htmlspecialchars($request['reason']); ?></td>
+                        <td><?php echo date('d M Y', strtotime($request['created_at'])); ?></td>
+                        <td class="action-buttons">
+                          <form method="POST" action="leave-request.php" class="d-inline">
+                            <input type="hidden" name="request_id" value="<?php echo $request['id']; ?>">
+                            <input type="hidden" name="action" value="approve">
+                            <div class="input-group mb-2">
+                              <input type="text" class="form-control form-control-sm" name="admin_remarks" placeholder="Remarks (optional)">
+                              <div class="input-group-append">
+                                <button type="submit" class="btn btn-success btn-sm">Approve</button>
+                              </div>
+                            </div>
+                          </form>
+                          <form method="POST" action="leave-request.php" class="d-inline">
+                            <input type="hidden" name="request_id" value="<?php echo $request['id']; ?>">
+                            <input type="hidden" name="action" value="deny">
+                            <div class="input-group">
+                              <input type="text" class="form-control form-control-sm" name="admin_remarks" placeholder="Reason for denial" required>
+                              <div class="input-group-append">
+                                <button type="submit" class="btn btn-danger btn-sm">Deny</button>
+                              </div>
+                            </div>
+                          </form>
+                        </td>
+                      </tr>
+                    <?php endforeach; ?>
+                  </tbody>
+                </table>
+              </div>
+            <?php endif; ?>
+          </div>
           
-          <?php if (!empty($error)): ?>
-            <div class="alert alert-danger"><?php echo $error; ?></div>
-          <?php endif; ?>
-          
-          <!-- Pending Leave Requests -->
-          <h4>Pending Requests</h4>
-          <?php if (empty($pending_requests)): ?>
-            <div class="alert alert-info">No pending leave requests</div>
-          <?php else: ?>
-            <div class="table-responsive">
-              <table class="table table-bordered table-striped">
-                <thead>
+          <!-- Processed Requests Tab -->
+          <div class="tab-pane fade" id="processed" role="tabpanel">
+            <div class="table-responsive mt-3">
+              <table class="table table-bordered table-hover">
+                <thead class="thead-dark">
                   <tr>
                     <th>Employee</th>
                     <th>Leave Type</th>
                     <th>Dates</th>
                     <th>Days</th>
                     <th>Reason</th>
-                    <th>Applied On</th>
-                    <th>Actions</th>
+                    <th>Status</th>
+                    <th>Admin Remarks</th>
+                    <th>Processed On</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <?php foreach ($pending_requests as $request): 
-                    // Get leave balance for warning
-                    $balance_stmt = $conn->prepare("SELECT * FROM leave_balance WHERE employee_id = ?");
-                    $balance_stmt->bind_param("s", $request['employee_id']);
-                    $balance_stmt->execute();
-                    $balance = $balance_stmt->get_result()->fetch_assoc();
-                    $balance_stmt->close();
-                    
-                    if (!$balance) {
-                        $balance = [
-                            'medical_leave_taken' => 0,
-                            'casual_leave_taken' => 0,
-                            'compensatory_leave_taken' => 0,
-                            'other_leave_taken' => 0
-                        ];
-                    }
-                    
-                    $leave_days = (strtotime($request['end_date']) - strtotime($request['start_date'])) / (60 * 60 * 24) + 1;
-                    $limit_warning = '';
-                    
-                    switch ($request['leave_type']) {
-                        case 'medical':
-                            $remaining = MEDICAL_LEAVE_LIMIT - $balance['medical_leave_taken'];
-                            if ($leave_days > $remaining) {
-                                $limit_warning = "Warning: Approving this will exceed medical leave limit ({$remaining} days remaining)";
-                            }
-                            break;
-                        case 'casual':
-                            $remaining = CASUAL_LEAVE_LIMIT - $balance['casual_leave_taken'];
-                            if ($leave_days > $remaining) {
-                                $limit_warning = "Warning: Approving this will exceed casual leave limit ({$remaining} days remaining)";
-                            }
-                            break;
-                        case 'other':
-                            $remaining = OTHER_LEAVE_LIMIT - $balance['other_leave_taken'];
-                            if ($leave_days > $remaining) {
-                                $limit_warning = "Warning: Approving this will exceed other leave limit ({$remaining} days remaining)";
-                            }
-                            break;
-                    }
-                  ?>
+                  <?php if (empty($processed_requests)): ?>
                     <tr>
-                      <td>
-                        <?php echo htmlspecialchars($request['employee_id']); ?><br>
-                        <strong><?php echo htmlspecialchars($request['first_name'] . ' ' . htmlspecialchars($request['last_name'])); ?></strong>
-                      </td>
-                      <td>
-                        <span class="badge <?php echo $leave_type_colors[$request['leave_type']] ?? 'badge-secondary'; ?>">
-                          <?php echo ucfirst($request['leave_type']); ?>
-                        </span>
-                      </td>
-                      <td>
-                        <?php echo date('d M Y', strtotime($request['start_date'])); ?> <br>
-                        to <br>
-                        <?php echo date('d M Y', strtotime($request['end_date'])); ?>
-                      </td>
-                      <td>
-                        <?php echo $leave_days; ?>
-                      </td>
-                      <td><?php echo htmlspecialchars($request['reason']); ?></td>
-                      <td><?php echo date('d M Y h:i A', strtotime($request['created_at'])); ?></td>
-                      <td class="action-buttons">
-                        <form method="POST" action="leave-request.php">
-                          <input type="hidden" name="request_id" value="<?php echo $request['id']; ?>">
-                          
-                          <?php if (!empty($limit_warning)): ?>
-                            <div class="leave-limit-warning mb-2">
-                              <i class="fas fa-exclamation-triangle"></i> <?php echo $limit_warning; ?>
-                            </div>
-                          <?php endif; ?>
-                          
-                          <div class="form-group">
-                            <textarea class="form-control mb-2" name="admin_remarks" placeholder="Admin remarks (optional)" rows="2"></textarea>
-                          </div>
-                          <div class="d-flex justify-content-between">
-                            <button type="submit" name="update_status" value="approved" class="btn btn-success">
-                              <i class="fas fa-check"></i> Approve
-                            </button>
-                            <button type="submit" name="update_status" value="rejected" class="btn btn-danger">
-                              <i class="fas fa-times"></i> Reject
-                            </button>
-                          </div>
-                        </form>
-                      </td>
+                      <td colspan="8" class="text-center">No processed leave requests</td>
                     </tr>
-                  <?php endforeach; ?>
+                  <?php else: ?>
+                    <?php foreach ($processed_requests as $request): ?>
+                      <tr>
+                        <td><?php echo htmlspecialchars($request['first_name'] . ' ' . $request['last_name']); ?></td>
+                        <td><?php echo ucfirst($request['leave_type']); ?></td>
+                        <td>
+                          <?php echo date('d M Y', strtotime($request['start_date'])); ?> - 
+                          <?php echo date('d M Y', strtotime($request['end_date'])); ?>
+                        </td>
+                        <td>
+                          <?php 
+                            $days = (strtotime($request['end_date']) - strtotime($request['start_date'])) / (60 * 60 * 24) + 1;
+                            echo $days;
+                          ?>
+                        </td>
+                        <td><?php echo htmlspecialchars($request['reason']); ?></td>
+                        <td>
+                          <span class="badge <?php echo $status_classes[$request['status']] ?? 'badge-secondary'; ?>">
+                            <?php echo ucfirst($request['status']); ?>
+                          </span>
+                        </td>
+                        <td><?php echo $request['admin_remarks'] ? htmlspecialchars($request['admin_remarks']) : '--'; ?></td>
+                        <td><?php echo date('d M Y', strtotime($request['updated_at'])); ?></td>
+                      </tr>
+                    <?php endforeach; ?>
+                  <?php endif; ?>
                 </tbody>
               </table>
             </div>
-          <?php endif; ?>
-          
-          <!-- Leave History with Filters -->
-          <h4 class="mt-5">Leave History</h4>
-          <div class="filter-section">
-            <form method="GET" class="form-inline">
-              <div class="form-group mr-3">
-                <label for="employee_id" class="mr-2">Employee:</label>
-                <select class="form-control" id="employee_id" name="employee_id">
-                  <option value="">All Employees</option>
-                  <?php foreach ($employees as $employee): ?>
-                    <option value="<?php echo $employee['id']; ?>" <?php echo $filter_employee == $employee['id'] ? 'selected' : ''; ?>>
-                      <?php echo htmlspecialchars($employee['name']); ?>
-                    </option>
-                  <?php endforeach; ?>
-                </select>
-              </div>
-              <div class="form-group mr-3">
-                <label for="month" class="mr-2">Month:</label>
-                <select class="form-control" id="month" name="month">
-                  <option value="">All Months</option>
-                  <?php for ($m = 1; $m <= 12; $m++): ?>
-                    <option value="<?php echo $m; ?>" <?php echo $m == $filter_month ? 'selected' : ''; ?>>
-                      <?php echo date('F', mktime(0, 0, 0, $m, 1)); ?>
-                    </option>
-                  <?php endfor; ?>
-                </select>
-              </div>
-              <div class="form-group mr-3">
-                <label for="year" class="mr-2">Year:</label>
-                <select class="form-control" id="year" name="year">
-                  <?php for ($y = date('Y'); $y >= date('Y') - 5; $y--): ?>
-                    <option value="<?php echo $y; ?>" <?php echo $y == $filter_year ? 'selected' : ''; ?>>
-                      <?php echo $y; ?>
-                    </option>
-                  <?php endfor; ?>
-                </select>
-              </div>
-              <div class="form-group mr-3">
-                <label for="status" class="mr-2">Status:</label>
-                <select class="form-control" id="status" name="status">
-                  <option value="">All Statuses</option>
-                  <option value="pending" <?php echo $filter_status == 'pending' ? 'selected' : ''; ?>>Pending</option>
-                  <option value="approved" <?php echo $filter_status == 'approved' ? 'selected' : ''; ?>>Approved</option>
-                  <option value="rejected" <?php echo $filter_status == 'rejected' ? 'selected' : ''; ?>>Rejected</option>
-                </select>
-              </div>
-              <button type="submit" class="btn btn-dark mr-2">Filter</button>
-              <a href="leave-request.php" class="btn btn-outline-secondary">Reset</a>
-            </form>
-          </div>
-          
-          <div class="table-responsive">
-            <table class="table table-bordered table-striped">
-              <thead>
-                <tr>
-                  <th>Employee</th>
-                  <th>Leave Type</th>
-                  <th>Dates</th>
-                  <th>Days</th>
-                  <th>Reason</th>
-                  <th>Status</th>
-                  <th>Admin Remarks</th>
-                  <th>Applied On</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                <?php if (empty($leave_history)): ?>
-                  <tr>
-                    <td colspan="9" class="text-center">No leave requests found with current filters</td>
-                  </tr>
-                <?php else: ?>
-                  <?php foreach ($leave_history as $request): ?>
-                    <tr>
-                      <td>
-                        <?php echo htmlspecialchars($request['employee_id']); ?><br>
-                        <strong><?php echo htmlspecialchars($request['first_name'] . ' ' . htmlspecialchars($request['last_name'])); ?></strong>
-                      </td>
-                      <td>
-                        <span class="badge <?php echo $leave_type_colors[$request['leave_type']] ?? 'badge-secondary'; ?>">
-                          <?php echo ucfirst($request['leave_type']); ?>
-                        </span>
-                      </td>
-                      <td>
-                        <?php echo date('d M Y', strtotime($request['start_date'])); ?> <br>
-                        to <br>
-                        <?php echo date('d M Y', strtotime($request['end_date'])); ?>
-                      </td>
-                      <td>
-                        <?php 
-                          $days = (strtotime($request['end_date']) - strtotime($request['start_date'])) / (60 * 60 * 24) + 1;
-                          echo $days;
-                        ?>
-                      </td>
-                      <td><?php echo htmlspecialchars($request['reason']); ?></td>
-                      <td>
-                        <span class="badge 
-                          <?php echo $request['status'] == 'approved' ? 'badge-success' : 
-                                 ($request['status'] == 'rejected' ? 'badge-danger' : 'badge-warning'); ?>">
-                          <?php echo ucfirst($request['status']); ?>
-                        </span>
-                      </td>
-                      <td><?php echo htmlspecialchars($request['admin_remarks'] ?: '--'); ?></td>
-                      <td><?php echo date('d M Y', strtotime($request['created_at'])); ?></td>
-                      <td class="action-buttons">
-                        <?php if ($request['status'] == 'pending'): ?>
-                          <form method="POST" action="leave-request.php">
-                            <input type="hidden" name="request_id" value="<?php echo $request['id']; ?>">
-                            <div class="form-group">
-                              <textarea class="form-control mb-2" name="admin_remarks" placeholder="Admin remarks" rows="2"><?php echo htmlspecialchars($request['admin_remarks']); ?></textarea>
-                            </div>
-                            <div class="d-flex justify-content-between">
-                              <button type="submit" name="update_status" value="approved" class="btn btn-success btn-sm">
-                                <i class="fas fa-check"></i> Approve
-                              </button>
-                              <button type="submit" name="update_status" value="rejected" class="btn btn-danger btn-sm">
-                                <i class="fas fa-times"></i> Reject
-                              </button>
-                            </div>
-                          </form>
-                        <?php elseif ($request['status'] == 'rejected'): ?>
-                          <form method="POST" action="leave-request.php">
-                            <input type="hidden" name="request_id" value="<?php echo $request['id']; ?>">
-                            <div class="form-group">
-                              <textarea class="form-control mb-2" name="admin_remarks" placeholder="Admin remarks" rows="2"><?php echo htmlspecialchars($request['admin_remarks']); ?></textarea>
-                            </div>
-                            <div class="d-flex justify-content-between">
-                              <button type="submit" name="update_status" value="approved" class="btn btn-success btn-sm">
-                                <i class="fas fa-check"></i> Approve
-                              </button>
-                              <button type="submit" name="update_status" value="pending" class="btn btn-warning btn-sm">
-                                <i class="fas fa-clock"></i> Pending
-                              </button>
-                            </div>
-                          </form>
-                        <?php else: ?>
-                          <!-- Approved leaves - no action buttons -->
-                          <?php if ($request['admin_remarks']): ?>
-                            <div class="approved-remarks">
-                              <?php echo htmlspecialchars($request['admin_remarks']); ?>
-                            </div>
-                          <?php else: ?>
-                            <span class="text-muted">Approved</span>
-                          <?php endif; ?>
-                        <?php endif; ?>
-                      </td>
-                    </tr>
-                  <?php endforeach; ?>
-                <?php endif; ?>
-              </tbody>
-            </table>
           </div>
         </div>
       </div>
     </div>
   </div>
 
+  <!-- Footer -->
+  <footer class="contact-section fixed-bottom text-center py-3">
+    <div class="container">
+      <p>9907415948 | 6262023330</p>
+      <p>oddbhilai@gmail.com</p>
+    </div>
+  </footer>
+
   <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
   <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
 </body>
 </html>
-
-<?php
-// Close DB connection after everything
-$conn->close();
-?>
