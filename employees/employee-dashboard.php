@@ -17,6 +17,19 @@ $result = $stmt->get_result();
 $employee = $result->fetch_assoc();
 $stmt->close();
 
+
+// Count unread notices
+$stmt = $conn->prepare("
+    SELECT COUNT(*) as unread_count 
+    FROM odd_notice n
+    LEFT JOIN notice_views nv ON n.id = nv.notice_id AND nv.employee_id = ?
+    WHERE nv.id IS NULL
+");
+$stmt->bind_param("s", $employee_id);
+$stmt->execute();
+$result = $stmt->get_result();
+$unread_notices = $result->fetch_assoc()['unread_count'];
+$stmt->close();
 $conn->close();
 ?>
 
@@ -55,6 +68,14 @@ $conn->close();
       padding: 20px;
       margin-bottom: 30px;
     }
+    .badge-notification {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    font-size: 0.7rem;
+    padding: 5px 7px;
+    border-radius: 50%;
+}
   </style>
 </head>
 <body>
@@ -128,16 +149,7 @@ $conn->close();
         </a>
       </div>
       
-      <!-- Overtime Tile -->
-      <div class="col-md-3 col-sm-6 mb-4">
-        <a href="employee/overtime.php" class="text-decoration-none">
-          <div class="dashboard-tile">
-            <i class="fas fa-clock"></i>
-            <h5>Overtime</h5>
-            <p class="text-muted small">Record overtime hours</p>
-          </div>
-        </a>
-      </div>
+
 
       <!-- Additional Suggested Tiles -->
       
@@ -165,7 +177,7 @@ $conn->close();
       
       <!-- Holidays Tile -->
       <div class="col-md-3 col-sm-6 mb-4">
-        <a href="employee/holidays.php" class="text-decoration-none">
+        <a href="holidays.php" class="text-decoration-none">
           <div class="dashboard-tile">
             <i class="fas fa-umbrella-beach"></i>
             <h5>Holidays</h5>
@@ -174,16 +186,21 @@ $conn->close();
         </a>
       </div>
       
-      <!-- Notices Tile -->
-      <div class="col-md-3 col-sm-6 mb-4">
-        <a href="employee/notices.php" class="text-decoration-none">
-          <div class="dashboard-tile">
-            <i class="fas fa-bullhorn"></i>
+      <!-- Notices Tile with Notification Badge -->
+<div class="col-md-3 col-sm-6 mb-4">
+    <a href="notices.php" class="text-decoration-none">
+        <div class="dashboard-tile">
+            <div class="position-relative">
+                <i class="fas fa-bullhorn"></i>
+                <?php if ($unread_notices > 0): ?>
+                    <span class="badge badge-danger badge-notification"><?php echo $unread_notices; ?></span>
+                <?php endif; ?>
+            </div>
             <h5>Notices</h5>
             <p class="text-muted small">Company announcements</p>
-          </div>
-        </a>
-      </div>
+        </div>
+    </a>
+</div>
     </div>
   </div>
 

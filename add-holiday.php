@@ -60,73 +60,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Generate dates between start and end date
             $current_date = $start_date;
             while (strtotime($current_date) <= strtotime($end_date)) {
-                // For each date, insert holiday for all employees
                 foreach ($employees as $employee) {
                     $employee_name = $employee['first_name'] . ' ' . $employee['last_name'];
                     
-                    // First check if record already exists for this employee and date
-                    $check_stmt = $conn->prepare("SELECT employee_id FROM attendance WHERE employee_id = ? AND DATE(created_at) = ?");
+                    // Check if attendance record exists for this employee+date
+                    $check_stmt = $conn->prepare("SELECT employee_id FROM attendance WHERE employee_id = ? AND date = ?");
                     $check_stmt->bind_param("ss", $employee['id'], $current_date);
                     $check_stmt->execute();
-                    $check_result = $check_stmt->get_result();
+                    $exists = $check_stmt->get_result()->num_rows > 0;
+                    $check_stmt->close();
                     
-                    if ($check_result->num_rows === 0) {
-                        // Only insert if record doesn't exist
-                        $attendance_stmt = $conn->prepare("INSERT INTO attendance 
-                            (employee_id, employee_name, check_in, check_out, total_hours, counted_hours, status, leave_type, comments, approved_by, created_at, updated_at) 
-                            VALUES (?, ?, 0, 0, 0, 0, 'holiday', '', ?, ?, ?, NOW())");
-                        
-                        $created_at = $current_date . ' 00:00:00';
-                        $attendance_stmt->bind_param("sssss", 
-                            $employee['id'], 
-                            $employee_name,
-                            $holiday_name,
-                            $admin_id,
-                            $created_at
-                        );
-                        $attendance_stmt->execute();
-                        $attendance_stmt->close();
-                    } else {
-                        // Update existing record if needed
-                        $update_stmt = $conn->prepare("UPDATE attendance SET 
+                    if ($exists) {
+                        // Update existing record
+                        $stmt = $conn->prepare("UPDATE attendance SET 
                             status = 'holiday',
                             comments = ?,
                             approved_by = ?,
                             updated_at = NOW()
-                            WHERE employee_id = ? AND DATE(created_at) = ?");
-                        $update_stmt->bind_param("ssss", 
-                            $holiday_name,
-                            $admin_id,
-                            $employee['id'],
-                            $current_date
-                        );
-                        $update_stmt->execute();
-                        $update_stmt->close();
+                            WHERE employee_id = ? AND date = ?");
+                        $stmt->bind_param("ssss", $holiday_name, $admin_id, $employee['id'], $current_date);
+                    } else {
+                        // Insert new record
+                        $stmt = $conn->prepare("INSERT INTO attendance 
+                            (employee_id, employee_name, date, check_in, check_out, total_hours, 
+                             counted_hours, status, leave_type, comments, approved_by, created_at, updated_at) 
+                            VALUES (?, ?, ?, 0, 0, 0, 0, 'holiday', '', ?, ?, NOW(), NOW())");
+                        $stmt->bind_param("sssss", $employee['id'], $employee_name, $current_date, $holiday_name, $admin_id);
                     }
-                    $check_stmt->close();
+                    $stmt->execute();
+                    $stmt->close();
                 }
                 $current_date = date('Y-m-d', strtotime($current_date . ' +1 day'));
             }
             
             // Commit transaction
             $conn->commit();
-            $success = "Holiday added successfully and attendance records updated!";
+            $success = "Holiday added successfully! Updated attendance for $days_count day(s).";
         } catch (Exception $e) {
-            // Rollback transaction on error
             $conn->rollback();
-            $error = "Error adding holiday: " . $e->getMessage();
+            $error = "Error processing holiday: " . $e->getMessage();
         }
     }
 }
 
 // Get existing holidays for display
 $holidays_result = $conn->query("SELECT holiday_name, start_date, end_date, added_at 
-                                FROM odd_holiday 
-                                ORDER BY start_date DESC");
-if ($holidays_result) {
-    $holidays = $holidays_result->fetch_all(MYSQLI_ASSOC);
-    $holidays_result->free();
-}
+                               FROM odd_holiday ORDER BY start_date DESC");
+$holidays = $holidays_result->fetch_all(MYSQLI_ASSOC);
+$holidays_result->free();
 
 $conn->close();
 ?>
@@ -209,10 +190,10 @@ $conn->close();
 
     <!-- Success/Error Messages -->
     <?php if ($error): ?>
-      <div class="alert alert-danger"><?php echo $error; ?></div>
+      <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
     <?php endif; ?>
     <?php if ($success): ?>
-      <div class="alert alert-success"><?php echo $success; ?></div>
+      <div class="alert alert-success"><?php echo htmlspecialchars($success); ?></div>
     <?php endif; ?>
 
     <div class="row">
